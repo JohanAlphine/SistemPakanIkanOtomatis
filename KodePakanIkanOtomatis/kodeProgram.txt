@@ -1,0 +1,164 @@
+// 3 MANTRA BLYNK (WAJIB PALING ATAS!)
+#define BLYNK_TEMPLATE_ID "TMPL6oFUXKFLO"
+#define BLYNK_TEMPLATE_NAME "UAP"
+#define BLYNK_AUTH_TOKEN "YXKJOeby7FGxfVZhOA6sVoZu7a9hlABL"
+
+//#define BLYNK_PRINT Serial
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+#include <DHT.h>
+#include <Servo.h>
+#include <virtuabotixRTC.h> 
+#include <time.h> 
+
+// ================= MAPPING PIN GPIO NODEMCU =================
+#define TRIG_PIN 5      
+#define ECHO_PIN 4      
+#define DHT_PIN 0       
+#define SERVO_PIN 2     
+#define RTC_RST 14      
+#define RTC_DAT 12      
+#define RTC_CLK 13      
+#define LED_MERAH 15    
+#define LED_KUNING 16   
+
+#define DHTTYPE DHT11
+
+// ================= KREDENSIAL WIFI =================
+char ssid[] = "TEMAN NONGKI";
+char pass[] = "temannongki1234";
+
+// ================= INSTANSIASI OBJEK =================
+DHT dht(DHT_PIN, DHTTYPE);
+Servo motorServo;
+virtuabotixRTC myRTC(RTC_CLK, RTC_DAT, RTC_RST); 
+BlynkTimer timer; 
+
+// ================= VARIABEL KONTROL =================
+const int JAM_PAGI = 8;
+const int JAM_SORE = 17;
+const int MENIT_MAKAN = 0;
+bool sudahMakan = false; 
+
+// FUNGSI UTAMA BACA SENSOR (Dipanggil Tiap 2 Detik)
+void bacaSensorDanLogika() {
+  myRTC.updateTime();
+  float hum = dht.readHumidity();
+
+  long duration, distance;
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+  duration = pulseIn(ECHO_PIN, HIGH);
+  distance = (duration / 2) / 29.1;
+
+  digitalWrite(LED_MERAH, LOW);
+  digitalWrite(LED_KUNING, LOW);
+
+  // ================= LOGIKA STATUS PAKAN & PERSENTASE =================
+  // Asumsi tinggi tabung 15cm. Jarak >15cm = 0% (Habis). Jarak <4cm = 100% (Penuh).
+  int persentasePakan = 0;
+  String statusPakan = "";
+
+  if (distance >= 15) {
+    persentasePakan = 0;
+    statusPakan = "HABIS";
+  } 
+  else if (distance <= 4) {
+    persentasePakan = 100;
+    statusPakan = "PENUH";
+  } 
+  else {
+    // Fungsi map() buat ngubah sisa jarak (5-14cm) jadi persentase proporsional
+    persentasePakan = map(distance, 15, 4, 0, 100);
+    statusPakan = "MENIPIS";
+  }
+
+  // ================= LOGIKA DANGER LEVEL DHT =================
+  bool statusAman = false;
+  String statusSistem = "";
+  
+  if (hum > 75.0) {
+    digitalWrite(LED_MERAH, HIGH);
+    statusAman = false; 
+    statusSistem = "BAHAYA: Pakan Rusak!";
+  } 
+  else if (hum >= 60.0 && hum <= 75.0) {
+    digitalWrite(LED_KUNING, HIGH);
+    statusAman = true; 
+    statusSistem = "WASPADA: Mulai Lembap";
+  } 
+  else {
+    statusAman = true; 
+    statusSistem = "AMAN: Ideal";
+  }
+
+  // ================= LOGIKA SERVO =================
+  bool waktunyaMakan = ((myRTC.hours == JAM_PAGI) || (myRTC.hours == JAM_SORE)) && (myRTC.minutes == MENIT_MAKAN);
+
+  if (waktunyaMakan && statusAman && !sudahMakan) {
+    motorServo.write(90); 
+    delay(1000); 
+    motorServo.write(0);  
+    sudahMakan = true; 
+  }
+
+  if (!waktunyaMakan) {
+    sudahMakan = false;
+  }
+
+  // ================= FORMAT JAM & KIRIM KE BLYNK =================
+  String stringJam = String(myRTC.hours);
+  String stringMenit = String(myRTC.minutes);
+  if (myRTC.minutes < 10) {
+    stringMenit = "0" + stringMenit; 
+  }
+  String waktuLokal = stringJam + ":" + stringMenit;
+
+  Blynk.virtualWrite(V1, hum);           
+  Blynk.virtualWrite(V2, persentasePakan); // YANG DIKIRIM SEKARANG PERSENTASE (0-100) 
+  Blynk.virtualWrite(V3, statusPakan);   
+  Blynk.virtualWrite(V4, statusSistem);  
+  Blynk.virtualWrite(V5, waktuLokal);    
+}
+
+void setup() {
+  Serial.begin(9600); 
+  
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  pinMode(LED_MERAH, OUTPUT);
+  pinMode(LED_KUNING, OUTPUT);
+
+  motorServo.attach(SERVO_PIN);
+  motorServo.write(0); 
+  dht.begin();
+
+  Serial.println("\nMenghubungkan ke Wi-Fi & Blynk...");
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass); 
+
+  configTime(7 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+  
+  time_t now = time(nullptr);
+  while (now < 100000) {
+    delay(500);
+    now = time(nullptr);
+  }
+  
+  struct tm timeinfo;
+  localtime_r(&now, &timeinfo); // Pake localtime_r biar jamnya tetep WIB!
+
+  myRTC.setDS1302Time(
+    timeinfo.tm_sec, timeinfo.tm_min, timeinfo.tm_hour, 
+    timeinfo.tm_wday + 1, timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900 
+  );
+
+  timer.setInterval(2000L, bacaSensorDanLogika); 
+}
+
+void loop() {
+  Blynk.run();
+  timer.run();
+}
