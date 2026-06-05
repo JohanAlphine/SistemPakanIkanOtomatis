@@ -9,6 +9,8 @@ Menginstall library RTC:
 
 ![dashboard](dashboard.png)
 
+![wiring](wiring.png)
+
 # Mekanisme Sistem Pakan Ikan Otomatis Berbasis IoT
 Sistem pakan ikan otomatis berbasis IoT ini menggunakan NodeMCU ESP8266 sebagai mikrokontroler utama yang terhubung dengan sensor DHT11, sensor ultrasonik HC-SR04, modul RTC DS1302, motor servo, LED indikator, dan platform Blynk untuk monitoring jarak jauh.
 
